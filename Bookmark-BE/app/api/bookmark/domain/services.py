@@ -7,7 +7,7 @@ from uuid import UUID
 # Third-party imports
 from dataclass_type_validator import dataclass_validate
 from fastapi import Depends, status
-from sqlalchemy import exc, select, and_, or_
+from sqlalchemy import exc, select, and_, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -16,6 +16,7 @@ from app.api.bookmark.domain.models import Bookmark, BrokenLinkLog
 from app.api.tag.domain.models import Tag
 from app.config.db_connection import get_async_db
 from app.utils.custom_exception import CustomException
+from app.utils.messages.custom_response_messages import get_response_message
 from app.utils.helpers.common_functions import extract_message_from_integrity_error
 from app.config.logger import logger
 
@@ -52,7 +53,9 @@ class BookmarkDomainServices:
         """
         return BookmarkFactory
 
-    async def create_bookmark(self, bookmark_data: BookmarkDataClass, tags: List[Tag]) -> Bookmark:
+    async def create_bookmark(
+        self, bookmark_data: BookmarkDataClass, tags: List[Tag]
+    ) -> Bookmark:
         """
         Create a new bookmark in the database.
         """
@@ -108,7 +111,9 @@ class BookmarkDomainServices:
         result = await self.db_session.execute(query)
         return list(result.scalars().all())
 
-    async def get_bookmark_by_id(self, bookmark_id: UUID, user_id: UUID) -> Optional[Bookmark]:
+    async def get_bookmark_by_id(
+        self, bookmark_id: UUID, user_id: UUID
+    ) -> Optional[Bookmark]:
         """
         Get bookmark by ID for a specific user.
         """
@@ -118,10 +123,19 @@ class BookmarkDomainServices:
             .where(Bookmark.id == bookmark_id, Bookmark.user_id == user_id)
         )
         result = await self.db_session.execute(query)
-        return result.scalars().first()
+        bookmark = result.scalars().first()
+        if not bookmark:
+            raise CustomException(
+                message=get_response_message("not_found", "Bookmark"),
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        return bookmark
 
     async def update_bookmark(
-        self, bookmark: Bookmark, bookmark_data: BookmarkDataClass, tags: Optional[List[Tag]] = None
+        self,
+        bookmark: Bookmark,
+        bookmark_data: BookmarkDataClass,
+        tags: Optional[List[Tag]] = None,
     ) -> Bookmark:
         """
         Update fields of a bookmark and save.
@@ -146,6 +160,39 @@ class BookmarkDomainServices:
             logger.error("SQLAlchemy Error while updating bookmark: %s", sqe)
             raise sqe
 
+    async def partial_update_bookmark(
+        self, bookmark: Bookmark, update_dict: dict
+    ) -> None:
+        """
+        Update an existing bookmark.
+
+        Args:
+            bookmark (Bookmark): The bookmark entity to update.
+            update_dict (dict): The data to update.
+
+        Returns:
+            None
+
+        Raises:
+            exc.SQLAlchemyError: If a database error occurs.
+        """
+        try:
+            query = (
+                update(Bookmark).where(Bookmark.id == bookmark.id).values(**update_dict)
+            )
+            await self.db_session.execute(query)
+            await self.db_session.commit()
+            await self.db_session.refresh(bookmark)
+            return None
+        except exc.SQLAlchemyError as sqe:
+            await self.db_session.rollback()
+            logger.error("SQLAlchemy Error while updating bookmark: %s", sqe)
+            raise sqe
+        except Exception as e:
+            await self.db_session.rollback()
+            logger.error("General Exception while updating bookmark: %s", e)
+            raise e
+
     async def delete_bookmark(self, bookmark: Bookmark) -> None:
         """
         Delete a bookmark from the database.
@@ -159,7 +206,10 @@ class BookmarkDomainServices:
             raise sqe
 
     async def log_broken_link_check(
-        self, bookmark_id: UUID, status_code: Optional[int], error_message: Optional[str]
+        self,
+        bookmark_id: UUID,
+        status_code: Optional[int],
+        error_message: Optional[str],
     ) -> BrokenLinkLog:
         """
         Log details of a broken link check.

@@ -86,7 +86,9 @@ class TagDomainServices:
         result = await self.db_session.execute(query)
         return result.scalars().first()
 
-    async def get_tag_by_id_and_user(self, tag_id: UUID, user_id: UUID) -> Optional[Tag]:
+    async def get_tag_by_id_and_user(
+        self, tag_id: UUID, user_id: UUID
+    ) -> Optional[Tag]:
         """
         Get a specific tag by ID and user.
         """
@@ -94,37 +96,15 @@ class TagDomainServices:
         result = await self.db_session.execute(query)
         return result.scalars().first()
 
-    async def get_tags_by_ids_and_user(self, tag_ids: List[UUID], user_id: UUID) -> List[Tag]:
+    async def get_tags_by_ids_and_user(
+        self, tag_ids: List[UUID], user_id: UUID
+    ) -> List[Tag]:
         """
         Get list of tags matching tag_ids and user_id.
         """
         query = select(Tag).where(and_(Tag.id.in_(tag_ids), Tag.user_id == user_id))
         result = await self.db_session.execute(query)
         return list(result.scalars().all())
-
-    async def get_or_create_tags_by_names(self, user_id: UUID, names: List[str]) -> List[Tag]:
-        """
-        Idempotently resolve a list of tag names into Tag database records.
-        Creates them if they don't already exist.
-        """
-        tags = []
-        for name in names:
-            name_stripped = name.strip()
-            if not name_stripped:
-                continue
-            tag = await self.get_tag_by_name_and_user(user_id, name_stripped)
-            if not tag:
-                tag_data = TagDataClass(user_id=user_id, name=name_stripped)
-                try:
-                    tag = self.get_factory().build_entity(tag_data)
-                    self.db_session.add(tag)
-                    await self.db_session.flush()
-                except exc.IntegrityError:
-                    await self.db_session.rollback()
-                    tag = await self.get_tag_by_name_and_user(user_id, name_stripped)
-            tags.append(tag)
-        await self.db_session.commit()
-        return tags
 
     async def get_tag_cloud(self, user_id: UUID) -> List[dict]:
         """
@@ -139,4 +119,4 @@ class TagDomainServices:
         )
         result = await self.db_session.execute(query)
         rows = result.all()
-        return [{"name": row.name, "count": row.count} for row in rows]
+        return rows

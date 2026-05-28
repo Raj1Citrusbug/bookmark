@@ -6,8 +6,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status, Query, BackgroundTasks
 
 # Local imports
-from app.schema.bookmark.request_schema import BookmarkCreateRequestSchema, BookmarkUpdateRequestSchema
-from app.schema.bookmark.response_schema import BookmarkResponseSchema, BookmarkListResponseSchema
+from app.schema.bookmark.request_schema import (
+    BookmarkCreateRequestSchema,
+    BookmarkUpdateRequestSchema,
+)
+from app.schema.bookmark.response_schema import (
+    BookmarkResponseSchema,
+    BookmarkListResponseSchema,
+)
 from app.schema.base import BaseResponseSchema
 from app.api.bookmark.application.services import BookmarkAppServices
 from app.api.auth.domain.models import User
@@ -15,25 +21,26 @@ from app.utils.middleware.auth_middleware import get_current_user
 from app.utils.response_handler import ResponseHandler
 from app.utils.messages.custom_response_messages import get_response_message
 
-
 router = APIRouter(prefix="/bookmarks", tags=["Bookmarks"])
 
 
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
-    response_model=BookmarkResponseSchema,
+    response_model=BaseResponseSchema,
 )
 async def create_bookmark(
     bookmark_data: BookmarkCreateRequestSchema,
     background_tasks: BackgroundTasks,
     current_user: Annotated[User, Depends(get_current_user)],
     bookmark_app_service: Annotated[BookmarkAppServices, Depends(BookmarkAppServices)],
-):
+) -> BaseResponseSchema:
     """
     Save a new bookmark. If the title is omitted, it will be automatically fetched in the background.
     """
-    result = await bookmark_app_service.create_bookmark(current_user, bookmark_data, background_tasks)
+    result = await bookmark_app_service.create_bookmark(
+        current_user, bookmark_data, background_tasks
+    )
     return ResponseHandler.success(
         message=get_response_message("create_success", "Bookmark"),
         data=result,
@@ -51,7 +58,7 @@ async def get_bookmarks(
     search: Optional[str] = Query(default=None, description="Search by title or notes"),
     tag: Optional[str] = Query(default=None, description="Filter by tag name"),
     archived: bool = Query(default=False, description="Filter by archived status"),
-):
+) -> BookmarkListResponseSchema:
     """
     Browse user's saved bookmarks with search and tag filters.
     """
@@ -74,7 +81,7 @@ async def get_bookmark(
     id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
     bookmark_app_service: Annotated[BookmarkAppServices, Depends(BookmarkAppServices)],
-):
+) -> BookmarkResponseSchema:
     """
     Retrieve details of a specific bookmark.
     """
@@ -85,10 +92,10 @@ async def get_bookmark(
     )
 
 
-@router.put(
+@router.patch(
     "/{id}",
     status_code=status.HTTP_200_OK,
-    response_model=BookmarkResponseSchema,
+    response_model=BaseResponseSchema,
 )
 async def update_bookmark(
     id: UUID,
@@ -99,10 +106,9 @@ async def update_bookmark(
     """
     Modify details of an existing bookmark.
     """
-    result = await bookmark_app_service.update_bookmark(current_user, id, bookmark_data)
+    await bookmark_app_service.update_bookmark(current_user, id, bookmark_data)
     return ResponseHandler.success(
         message=get_response_message("update_success", "Bookmark"),
-        data=result,
     )
 
 

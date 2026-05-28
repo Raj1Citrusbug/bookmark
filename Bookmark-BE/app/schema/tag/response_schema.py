@@ -7,7 +7,6 @@ from app.schema.base import BaseSchema, BaseResponseSchema
 class TagDetailDataSchema(BaseSchema):
     id: UUID
     name: str
-    created_at: datetime
 
 
 class TagCloudDataSchema(BaseSchema):

@@ -5,8 +5,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 
 # Local imports
-from app.schema.auth.request_schema import SignupUserRequestSchema, LoginUserRequestSchema
-from app.schema.auth.response_schema import LoginResponseSchema, UserResponseSchema
+from app.schema.auth.request_schema import (
+    SignupUserRequestSchema,
+    LoginUserRequestSchema,
+)
+from app.schema.auth.response_schema import (
+    LoginResponseSchema,
+    UserProfileResponseSchema,
+)
 from app.schema.base import BaseResponseSchema
 from app.api.auth.application.services import UserAppServices
 from app.api.auth.domain.models import User
@@ -58,7 +64,7 @@ async def login(
 @user_router.get(
     "/me",
     status_code=status.HTTP_200_OK,
-    response_model=BaseResponseSchema,
+    response_model=UserProfileResponseSchema,
 )
 async def get_me(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -66,14 +72,7 @@ async def get_me(
     """
     Retrieve profile details of the currently authenticated user.
     """
-    user_data = UserResponseSchema(
-        id=current_user.id,
-        name=current_user.name,
-        email=current_user.email,
-        role=current_user.role,
-        is_active=current_user.is_active,
-    )
     return ResponseHandler.success(
         message=get_response_message("detail_success", "User profile"),
-        data=user_data.model_dump(),
+        data=current_user,
     )

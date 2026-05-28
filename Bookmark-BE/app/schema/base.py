@@ -72,23 +72,15 @@ class BaseQueryParams(BaseModel):
         """
 
         super().__init_subclass__(**kwargs)
-
         if hasattr(cls, "SEARCH_FIELDS"):
-
             search_fields = getattr(cls, "SEARCH_FIELDS")
-
             if search_fields:
-
                 if len(search_fields) > 1:
-
                     formatted_fields = (
                         ", ".join(search_fields[:-1]) + f" or {search_fields[-1]}"
                     )
-
                 else:
-
                     formatted_fields = search_fields[0]
-
                 cls.model_fields["search"].description = (
                     f"Search term to filter by {formatted_fields}"
                 )

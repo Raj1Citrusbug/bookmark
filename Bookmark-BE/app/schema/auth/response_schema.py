@@ -10,9 +10,11 @@ class UserResponseSchema(BaseSchema):
     is_active: bool
 
 
+class UserProfileResponseSchema(BaseResponseSchema):
+    data: UserResponseSchema
+
 class LoginDataResponseSchema(BaseSchema):
     access_token: str
-    token_type: str = "Bearer"
     user: UserResponseSchema
 
 

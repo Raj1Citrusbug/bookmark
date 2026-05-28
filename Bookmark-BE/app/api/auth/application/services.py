@@ -102,6 +102,5 @@ class UserAppServices:
 
         return LoginDataResponseSchema(
             access_token=access_token,
-            token_type="Bearer",
             user=user,
         )

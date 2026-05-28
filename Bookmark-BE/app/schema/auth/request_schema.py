@@ -1,5 +1,5 @@
 import re
-from pydantic import Field, field_validator, EmailStr
+from pydantic import Field, field_validator, EmailStr, ConfigDict
 from fastapi import status
 
 from app.schema.base import BaseSchema
@@ -11,6 +11,16 @@ class SignupUserRequestSchema(BaseSchema):
     name: str = Field(..., min_length=1, max_length=255)
     email: EmailStr
     password: str = Field(..., min_length=8)
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "John Doe",
+                "email": "user@example.com",
+                "password": "Password123!",
+            }
+        },
+    )
 
     @field_validator("password")
     @classmethod
@@ -27,3 +37,13 @@ class LoginUserRequestSchema(BaseSchema):
     email: EmailStr
     password: str
     remember_me: bool = False
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "email": "user@example.com",
+                "password": "Password123!",
+                "remember_me": True,
+            }
+        },
+    )

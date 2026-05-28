@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 
 # Local imports
+from app.schema.base import BaseResponseSchema
 from app.schema.tag.request_schema import TagCreateRequestSchema
 from app.schema.tag.response_schema import TagListResponseSchema, TagCloudResponseSchema
 from app.api.tag.application.services import TagAppServices
@@ -38,7 +39,7 @@ async def get_tags(
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
-    response_model=TagListResponseSchema,
+    response_model=BaseResponseSchema,
 )
 async def create_tag(
     tag_data: TagCreateRequestSchema,
@@ -48,10 +49,9 @@ async def create_tag(
     """
     Create a new custom tag.
     """
-    result = await tag_app_service.create_tag(current_user, tag_data)
+    await tag_app_service.create_tag(current_user, tag_data)
     return ResponseHandler.success(
         message=get_response_message("create_success", "Tag"),
-        data=[result],
     )
 
 

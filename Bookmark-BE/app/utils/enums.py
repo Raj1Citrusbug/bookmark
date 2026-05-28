@@ -4,8 +4,8 @@ from enum import Enum
 class RoleType(Enum):
     """Enum representing Role Types."""
 
-    ADMIN = "admin"
-    USER = "user"
+    ADMIN = "ADMIN"
+    USER = "USER"
 
 
 class TokenType(Enum):
