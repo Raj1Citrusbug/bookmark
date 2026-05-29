@@ -3,12 +3,12 @@ import re
 from uuid import UUID
 
 # Third-party imports
-from typing import List, Optional
+from typing import ClassVar, List, Optional
 from fastapi import status
 from pydantic import Field, field_validator, ConfigDict
 
 # Local application imports
-from app.schema.base import BaseSchema
+from app.schema.base import BaseSchema, BaseQueryParams
 
 from app.utils.custom_exception import CustomException
 from app.utils.helpers.common_functions import URL_REGEX
@@ -16,7 +16,7 @@ from app.utils.helpers.common_functions import URL_REGEX
 
 class BookmarkCreateRequestSchema(BaseSchema):
     url: str
-    title: Optional[str] = Field(default=None)
+    title: Optional[str] = Field(default=None, max_length=255)
     notes: Optional[str] = Field(default=None)
     tags: Optional[List[UUID]] = Field(default=[])
 
@@ -47,7 +47,7 @@ class BookmarkCreateRequestSchema(BaseSchema):
 
 
 class BookmarkUpdateRequestSchema(BaseSchema):
-    title: Optional[str] = Field(default=None)
+    title: Optional[str] = Field(default=None, max_length=255)
     notes: Optional[str] = Field(default=None)
     tags: Optional[List[UUID]] = Field(default=None)
 
@@ -60,3 +60,10 @@ class BookmarkUpdateRequestSchema(BaseSchema):
             }
         },
     )
+
+
+class BookmarkQueryParamsSchema(BaseQueryParams):
+    tag: Optional[str] = Field(default=None, description="Filter by tag name")
+    archived: Optional[bool] = Field(default=None, description="Filter by archived status")
+
+    SEARCH_FIELDS: ClassVar[list[str]] =["title", "notes"]

@@ -1,14 +1,15 @@
 # Standard library imports
-from typing import Annotated, Optional
+from typing import Annotated
 from uuid import UUID
 
 # Third-party imports
-from fastapi import APIRouter, Depends, status, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, status
 
 # Local imports
 from app.schema.bookmark.request_schema import (
     BookmarkCreateRequestSchema,
     BookmarkUpdateRequestSchema,
+    BookmarkQueryParamsSchema,
 )
 from app.schema.bookmark.response_schema import (
     BookmarkResponseSchema,
@@ -31,7 +32,6 @@ router = APIRouter(prefix="/bookmarks", tags=["Bookmarks"])
 )
 async def create_bookmark(
     bookmark_data: BookmarkCreateRequestSchema,
-    background_tasks: BackgroundTasks,
     current_user: Annotated[User, Depends(get_current_user)],
     bookmark_app_service: Annotated[BookmarkAppServices, Depends(BookmarkAppServices)],
 ) -> BaseResponseSchema:
@@ -39,7 +39,7 @@ async def create_bookmark(
     Save a new bookmark. If the title is omitted, it will be automatically fetched in the background.
     """
     result = await bookmark_app_service.create_bookmark(
-        current_user, bookmark_data, background_tasks
+        current_user, bookmark_data
     )
     return ResponseHandler.success(
         message=get_response_message("create_success", "Bookmark"),
@@ -55,20 +55,19 @@ async def create_bookmark(
 async def get_bookmarks(
     current_user: Annotated[User, Depends(get_current_user)],
     bookmark_app_service: Annotated[BookmarkAppServices, Depends(BookmarkAppServices)],
-    search: Optional[str] = Query(default=None, description="Search by title or notes"),
-    tag: Optional[str] = Query(default=None, description="Filter by tag name"),
-    archived: bool = Query(default=False, description="Filter by archived status"),
+    params: BookmarkQueryParamsSchema = Depends(),
 ) -> BookmarkListResponseSchema:
     """
     Browse user's saved bookmarks with search and tag filters.
     """
-    result = await bookmark_app_service.get_bookmarks(
-        current_user, search=search, tag=tag, archived=archived
+    result, total_count = await bookmark_app_service.get_bookmarks(
+        current_user,
+        params,
     )
     return ResponseHandler.success_listing(
         message=get_response_message("detail_success", "Bookmarks"),
         data=result,
-        count=len(result),
+        count=total_count,
     )
 
 
@@ -134,40 +133,19 @@ async def delete_bookmark(
 @router.patch(
     "/{id}/archive",
     status_code=status.HTTP_200_OK,
-    response_model=BookmarkResponseSchema,
+    response_model=BaseResponseSchema,
 )
 async def archive_bookmark(
     id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
     bookmark_app_service: Annotated[BookmarkAppServices, Depends(BookmarkAppServices)],
-):
+) -> BaseResponseSchema:
     """
-    Hide a bookmark by moving it to the archive.
+    Toggle the archive status of a bookmark.
     """
-    result = await bookmark_app_service.archive_bookmark(current_user, id)
+    await bookmark_app_service.archive_bookmark(current_user, id)
     return ResponseHandler.success(
         message=get_response_message("update_success", "Bookmark archived status"),
-        data=result,
-    )
-
-
-@router.patch(
-    "/{id}/unarchive",
-    status_code=status.HTTP_200_OK,
-    response_model=BookmarkResponseSchema,
-)
-async def unarchive_bookmark(
-    id: UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
-    bookmark_app_service: Annotated[BookmarkAppServices, Depends(BookmarkAppServices)],
-):
-    """
-    Restore an archived bookmark back to the main list.
-    """
-    result = await bookmark_app_service.unarchive_bookmark(current_user, id)
-    return ResponseHandler.success(
-        message=get_response_message("update_success", "Bookmark archived status"),
-        data=result,
     )
 
 
@@ -178,14 +156,13 @@ async def unarchive_bookmark(
 )
 async def refetch_title(
     id: UUID,
-    background_tasks: BackgroundTasks,
     current_user: Annotated[User, Depends(get_current_user)],
     bookmark_app_service: Annotated[BookmarkAppServices, Depends(BookmarkAppServices)],
 ):
     """
     Force refetch title extraction from the webpage in the background.
     """
-    await bookmark_app_service.refetch_title(current_user, id, background_tasks)
+    await bookmark_app_service.refetch_title(current_user, id)
     return ResponseHandler.success(
         message="Title extraction scheduled successfully",
     )

@@ -1,5 +1,5 @@
 # Standard library imports
-from typing import List
+from typing import List, Tuple
 
 # Third-party imports
 from fastapi import Depends
@@ -7,6 +7,7 @@ from fastapi import Depends
 # Local imports
 from app.api.admin.domain.services import AdminDomainServices
 from app.schema.admin.response_schema import GlobalBrokenLinkDataSchema
+from app.schema.admin.request_schema import AdminBrokenLinksQueryParamsSchema
 
 
 class AdminAppServices:
@@ -16,20 +17,14 @@ class AdminAppServices:
     ) -> None:
         self.admin_domain_services = admin_domain_services
 
-    async def get_global_broken_links_report(self) -> List[GlobalBrokenLinkDataSchema]:
+    async def get_global_broken_links_report(
+        self,
+        query_params: AdminBrokenLinksQueryParamsSchema,
+    ) -> Tuple[List[GlobalBrokenLinkDataSchema], int]:
         """
         Compile system-wide report details of all broken bookmarks (Admin only).
         """
-        bookmarks = await self.admin_domain_services.get_all_broken_bookmarks()
-        return [
-            GlobalBrokenLinkDataSchema(
-                bookmark_id=b.id,
-                bookmark_title=b.title,
-                bookmark_url=b.url,
-                owner_name=b.user.name if b.user else "Unknown",
-                owner_email=b.user.email if b.user else "Unknown",
-                last_checked_at=b.last_checked_at,
-                broken_reason=b.broken_reason,
-            )
-            for b in bookmarks
-        ]
+        report_data, total_count = (
+            await self.admin_domain_services.get_all_broken_bookmarks(query_params)
+        )
+        return report_data, total_count

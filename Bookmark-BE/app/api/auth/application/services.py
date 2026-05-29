@@ -13,7 +13,6 @@ from app.utils.custom_exception import CustomException
 from app.utils.enums import RoleType
 from app.utils.messages.custom_response_messages import get_response_message
 from app.utils.service.token_service import TokenServices, AccessTokenData
-from app.utils.service.email_service import email_service
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 token_services = TokenServices()
@@ -63,9 +62,6 @@ class UserAppServices:
         )
 
         user = await self.user_domain_services.create_user(user_data)
-
-        # Send welcome email asynchronously (simulated)
-        await email_service.send_welcome_email(user.email, user.name)
 
         return None
 

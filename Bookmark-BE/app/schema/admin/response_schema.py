@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
-from app.schema.base import BaseSchema, BaseResponseSchema
+from app.schema.base import BaseSchema, BaseListingResponseSchema
 
 
 class GlobalBrokenLinkDataSchema(BaseSchema):
@@ -14,5 +14,5 @@ class GlobalBrokenLinkDataSchema(BaseSchema):
     broken_reason: Optional[str] = None
 
 
-class GlobalBrokenLinksResponseSchema(BaseResponseSchema):
+class GlobalBrokenLinksResponseSchema(BaseListingResponseSchema):
     data: List[GlobalBrokenLinkDataSchema]

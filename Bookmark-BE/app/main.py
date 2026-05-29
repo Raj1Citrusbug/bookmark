@@ -1,5 +1,4 @@
 # Third-party imports
-from contextlib import asynccontextmanager
 from fastapi import FastAPI, status, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +9,7 @@ from app.api.auth.routers.auth import auth_router, user_router
 from app.api.bookmark.routers.bookmark import router as bookmark_router
 from app.api.tag.routers.tag import router as tag_router
 from app.api.admin.routers.admin import router as admin_router
+from app.config.celery_app import celery_app
 
 from app.config.settings import app_settings
 
@@ -17,28 +17,6 @@ from app.utils.middleware.exception_handler.custom_exception import (
     GlobalExceptionMiddleware,
 )
 from app.utils.middleware.exception_handler.request_validator import RequestValidator
-from app.utils.scheduler import (
-    start_scheduler,
-    shutdown_scheduler,
-    add_weekly_broken_link_check_task,
-)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Lifecycle hook for the FastAPI application.
-    Creates tables, seeds admin user, and runs the background scheduler.
-    """
-    # Start background scheduler
-    add_weekly_broken_link_check_task()
-    start_scheduler()
-
-    try:
-        yield
-    finally:
-        # Shutdown scheduler
-        shutdown_scheduler()
 
 
 app = FastAPI(
@@ -49,7 +27,6 @@ app = FastAPI(
     root_path=app_settings.APP_PREFIX,
     docs_url="/docs" if app_settings.DEBUG else None,
     redoc_url="/redoc" if app_settings.DEBUG else None,
-    lifespan=lifespan,
 )
 
 # Global Exception Middleware

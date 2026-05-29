@@ -1,13 +1,13 @@
 # Standard library imports
 from dataclasses import dataclass, asdict
 from datetime import datetime
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Optional, Tuple
 from uuid import UUID
 
 # Third-party imports
 from dataclass_type_validator import dataclass_validate
 from fastapi import Depends, status
-from sqlalchemy import exc, select, and_, or_, update
+from sqlalchemy import exc, select, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -19,6 +19,8 @@ from app.utils.custom_exception import CustomException
 from app.utils.messages.custom_response_messages import get_response_message
 from app.utils.helpers.common_functions import extract_message_from_integrity_error
 from app.config.logger import logger
+from app.schema.bookmark.request_schema import BookmarkQueryParamsSchema
+from app.utils.enums import SortOrder
 
 
 @dataclass_validate(before_post_init=True)
@@ -82,34 +84,56 @@ class BookmarkDomainServices:
     async def get_bookmarks(
         self,
         user_id: UUID,
-        search: Optional[str] = None,
-        tag: Optional[str] = None,
-        archived: bool = False,
-    ) -> List[Bookmark]:
+        query_params: BookmarkQueryParamsSchema,
+    ) -> Tuple[List[Bookmark], int]:
         """
-        Retrieve bookmarks matching specific filters.
+        Retrieve bookmarks matching specific filters, with pagination.
         """
-        query = (
-            select(Bookmark)
-            .options(selectinload(Bookmark.tags))
-            .where(Bookmark.user_id == user_id, Bookmark.is_archived == archived)
-        )
+        filters = set()
+        filters.add(Bookmark.user_id == user_id)
 
-        if search:
-            search_pattern = f"%{search}%"
-            query = query.where(
+        if query_params.search:
+            search_pattern = f"%{query_params.search}%"
+            filters.add(
                 or_(
                     Bookmark.title.ilike(search_pattern),
                     Bookmark.notes.ilike(search_pattern),
                 )
             )
 
-        if tag:
-            query = query.where(Bookmark.tags.any(Tag.name.ilike(tag)))
+        if query_params.tag:
+            filters.add(Bookmark.tags.any(Tag.name.ilike(query_params.tag)))
 
-        query = query.order_by(Bookmark.created_at.desc())
-        result = await self.db_session.execute(query)
-        return list(result.scalars().all())
+        if query_params.archived is not None:
+            filters.add(Bookmark.is_archived == query_params.archived)
+
+        base_query = (
+            select(Bookmark, func.count().over().label("total_count"))
+            .options(selectinload(Bookmark.tags))
+            .where(*filters)
+        )
+
+        order_by = (
+            Bookmark.created_at.asc()
+            if query_params.sort_order == SortOrder.ASC
+            else Bookmark.created_at.desc()
+        )
+
+        # Apply pagination and order
+        paginated_query = (
+            base_query.order_by(order_by)
+            .offset((query_params.page - 1) * query_params.limit)
+            .limit(query_params.limit)
+        )
+        result = await self.db_session.execute(paginated_query)
+        rows = result.all()
+
+        if not rows:
+            return [], 0
+
+        bookmarks = [row[0] for row in rows]
+        total_count = int(rows[0].total_count)
+        return bookmarks, total_count
 
     async def get_bookmark_by_id(
         self, bookmark_id: UUID, user_id: UUID
@@ -131,35 +155,6 @@ class BookmarkDomainServices:
             )
         return bookmark
 
-    async def update_bookmark(
-        self,
-        bookmark: Bookmark,
-        bookmark_data: BookmarkDataClass,
-        tags: Optional[List[Tag]] = None,
-    ) -> Bookmark:
-        """
-        Update fields of a bookmark and save.
-        """
-        try:
-            bookmark.url = bookmark_data.url
-            bookmark.title = bookmark_data.title
-            bookmark.notes = bookmark_data.notes
-            bookmark.is_archived = bookmark_data.is_archived
-            bookmark.is_broken = bookmark_data.is_broken
-            bookmark.broken_reason = bookmark_data.broken_reason
-            bookmark.last_checked_at = bookmark_data.last_checked_at
-            if tags is not None:
-                bookmark.tags = tags
-
-            self.db_session.add(bookmark)
-            await self.db_session.commit()
-            await self.db_session.refresh(bookmark)
-            return bookmark
-        except exc.SQLAlchemyError as sqe:
-            await self.db_session.rollback()
-            logger.error("SQLAlchemy Error while updating bookmark: %s", sqe)
-            raise sqe
-
     async def partial_update_bookmark(
         self, bookmark: Bookmark, update_dict: dict
     ) -> None:
@@ -177,10 +172,8 @@ class BookmarkDomainServices:
             exc.SQLAlchemyError: If a database error occurs.
         """
         try:
-            query = (
-                update(Bookmark).where(Bookmark.id == bookmark.id).values(**update_dict)
-            )
-            await self.db_session.execute(query)
+            for key, value in update_dict.items():
+                setattr(bookmark, key, value)
             await self.db_session.commit()
             await self.db_session.refresh(bookmark)
             return None

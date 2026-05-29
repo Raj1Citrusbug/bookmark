@@ -1,22 +1,21 @@
 # Standard library imports
-from typing import List, Optional
+from typing import List, Tuple
 from uuid import UUID
 
 # Third-party imports
-from fastapi import Depends, status, BackgroundTasks
+from fastapi import Depends, status
 
 # Local application imports
 from app.api.bookmark.domain.services import BookmarkDomainServices, BookmarkDataClass
-from app.api.bookmark.domain.models import Bookmark
 from app.api.tag.domain.services import TagDomainServices
 from app.api.auth.domain.models import User
 from app.schema.bookmark.request_schema import (
     BookmarkCreateRequestSchema,
     BookmarkUpdateRequestSchema,
+    BookmarkQueryParamsSchema,
 )
 from app.schema.bookmark.response_schema import BookmarkDetailDataSchema
 from app.utils.custom_exception import CustomException
-from app.utils.messages.custom_response_messages import get_response_message
 from app.tasks.bookmark_tasks import fetch_title_task
 
 
@@ -35,7 +34,6 @@ class BookmarkAppServices:
         self,
         current_user: User,
         bookmark_data: BookmarkCreateRequestSchema,
-        background_tasks: BackgroundTasks,
     ) -> None:
         """
         Create a new bookmark, map its tags, and schedule background title scraping if needed.
@@ -65,24 +63,23 @@ class BookmarkAppServices:
         bookmark = await self.bookmark_domain_services.create_bookmark(data, tags)
 
         if not title:
-            background_tasks.add_task(fetch_title_task, str(bookmark.id))
+            fetch_title_task.delay(str(bookmark.id))
 
         return None
 
     async def get_bookmarks(
         self,
         current_user: User,
-        search: Optional[str] = None,
-        tag: Optional[str] = None,
-        archived: bool = False,
-    ) -> List[BookmarkDetailDataSchema]:
+        query_params: BookmarkQueryParamsSchema,
+    ) -> Tuple[List[BookmarkDetailDataSchema], int]:
         """
-        Browse user's saved bookmarks with search and tag filters.
+        Browse user's saved bookmarks with search, tag filters and pagination.
         """
-        bookmarks = await self.bookmark_domain_services.get_bookmarks(
-            current_user.id, search=search, tag=tag, archived=archived
+        bookmarks, total_count = await self.bookmark_domain_services.get_bookmarks(
+            current_user.id,
+            query_params,
         )
-        return bookmarks
+        return bookmarks, total_count
 
     async def get_bookmark(
         self, current_user: User, bookmark_id: UUID
@@ -140,51 +137,19 @@ class BookmarkAppServices:
         self, current_user: User, bookmark_id: UUID
     ) -> BookmarkDetailDataSchema:
         """
-        Hide a bookmark by moving it to the archive.
+        Toggle the archive status of a bookmark.
         """
         bookmark = await self.bookmark_domain_services.get_bookmark_by_id(
             bookmark_id, current_user.id
         )
 
-        data = BookmarkDataClass(
-            user_id=bookmark.user_id,
-            url=bookmark.url,
-            title=bookmark.title,
-            notes=bookmark.notes,
-            is_archived=True,
-            is_broken=bookmark.is_broken,
-            broken_reason=bookmark.broken_reason,
-            last_checked_at=bookmark.last_checked_at,
+        update_data = {"is_archived": not bookmark.is_archived}
+        await self.bookmark_domain_services.partial_update_bookmark(
+            bookmark, update_data
         )
-        updated = await self.bookmark_domain_services.update_bookmark(bookmark, data)
-        return BookmarkDetailDataSchema.model_validate(updated)
+        return None
 
-    async def unarchive_bookmark(
-        self, current_user: User, bookmark_id: UUID
-    ) -> BookmarkDetailDataSchema:
-        """
-        Restore an archived bookmark back to the main list.
-        """
-        bookmark = await self.bookmark_domain_services.get_bookmark_by_id(
-            bookmark_id, current_user.id
-        )
-
-        data = BookmarkDataClass(
-            user_id=bookmark.user_id,
-            url=bookmark.url,
-            title=bookmark.title,
-            notes=bookmark.notes,
-            is_archived=False,
-            is_broken=bookmark.is_broken,
-            broken_reason=bookmark.broken_reason,
-            last_checked_at=bookmark.last_checked_at,
-        )
-        updated = await self.bookmark_domain_services.update_bookmark(bookmark, data)
-        return BookmarkDetailDataSchema.model_validate(updated)
-
-    async def refetch_title(
-        self, current_user: User, bookmark_id: UUID, background_tasks: BackgroundTasks
-    ) -> None:
+    async def refetch_title(self, current_user: User, bookmark_id: UUID) -> None:
         """
         Force refetch title extraction from the webpage in the background.
         """
@@ -192,4 +157,4 @@ class BookmarkAppServices:
             bookmark_id, current_user.id
         )
 
-        background_tasks.add_task(fetch_title_task, str(bookmark.id))
+        fetch_title_task.delay(str(bookmark.id))

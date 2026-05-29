@@ -1,4 +1,5 @@
 # Standard library imports
+import asyncio
 import httpx
 
 # Third-party imports
@@ -7,11 +8,14 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from celery import shared_task
 
 # Local application imports
+from app.config.db_connection import get_async_engine
 from app.api.bookmark.domain.models import Bookmark, BrokenLinkLog
+from app.api.auth.domain.models import User
+from app.api.tag.domain.models import Tag
 from app.config.db_connection import AsyncSessionLocal
-from app.utils.service.email_service import email_service
 from app.config.logger import logger
 
 # Set a standard User-Agent to prevent scrapers from being blocked
@@ -20,69 +24,94 @@ HEADERS = {
 }
 
 
-async def fetch_title_task(bookmark_id: str):
+@shared_task(name="app.tasks.bookmark_tasks.fetch_title_task")
+def fetch_title_task(bookmark_id: str):
+    """
+    Celery task wrapper for scraping webpage titles.
+    """
+    asyncio.run(_fetch_title_task_async(bookmark_id))
+
+
+async def _fetch_title_task_async(bookmark_id: str):
     """
     Scrapes a webpage to extract its <title> and updates the bookmark.
     """
-    async with AsyncSessionLocal() as session:
-        try:
-            # Find bookmark
-            query = select(Bookmark).where(Bookmark.id == bookmark_id)
-            result = await session.execute(query)
-            bookmark = result.scalars().first()
+    try:
+        async with AsyncSessionLocal() as session:
+            try:
+                # Find bookmark
+                query = select(Bookmark).where(Bookmark.id == bookmark_id)
+                result = await session.execute(query)
+                bookmark = result.scalars().first()
 
-            if not bookmark:
-                logger.warning(f"Bookmark {bookmark_id} not found for title scraping.")
-                return
+                if not bookmark:
+                    logger.warning(
+                        f"Bookmark {bookmark_id} not found for title scraping."
+                    )
+                    return
 
-            logger.info(f"Scraping title for bookmark {bookmark.id} ({bookmark.url})")
+                logger.info(
+                    f"Scraping title for bookmark {bookmark.id} ({bookmark.url})"
+                )
 
-            async with httpx.AsyncClient(
-                headers=HEADERS, follow_redirects=True, timeout=10.0
-            ) as client:
-                response = await client.get(bookmark.url)
+                async with httpx.AsyncClient(
+                    headers=HEADERS, follow_redirects=True, timeout=10.0
+                ) as client:
+                    response = await client.get(bookmark.url)
 
-                if response.status_code == 200:
-                    soup = BeautifulSoup(response.text, "html.parser")
-                    title_tag = soup.find("title")
+                    if response.status_code == 200:
+                        soup = BeautifulSoup(response.text, "html.parser")
+                        title_tag = soup.find("title")
 
-                    if title_tag and title_tag.string:
-                        bookmark.title = title_tag.string.strip()
+                        if title_tag and title_tag.string:
+                            bookmark.title = title_tag.string.strip()
+                        else:
+                            parsed_url = urlparse(bookmark.url)
+                            bookmark.title = parsed_url.netloc or bookmark.url
                     else:
                         parsed_url = urlparse(bookmark.url)
                         bookmark.title = parsed_url.netloc or bookmark.url
-                else:
-                    parsed_url = urlparse(bookmark.url)
-                    bookmark.title = parsed_url.netloc or bookmark.url
 
-            session.add(bookmark)
-            await session.commit()
-            logger.info(
-                f"Updated title for bookmark {bookmark.id} to '{bookmark.title}'"
-            )
+                session.add(bookmark)
+                await session.commit()
+                logger.info(
+                    f"Updated title for bookmark {bookmark.id} to '{bookmark.title}'"
+                )
 
-        except Exception as e:
-            logger.error(f"Error scraping title for bookmark {bookmark_id}: {str(e)}")
-            try:
-                query = select(Bookmark).where(Bookmark.id == bookmark_id)
-                res = await session.execute(query)
-                bm = res.scalars().first()
-                if bm:
-                    parsed_url = urlparse(bm.url)
-                    bm.title = parsed_url.netloc or bm.url
-                    session.add(bm)
-                    await session.commit()
-            except Exception as ex:
-                logger.error(f"Fallback title update failed: {str(ex)}")
+            except Exception as e:
+                logger.error(
+                    f"Error scraping title for bookmark {bookmark_id}: {str(e)}"
+                )
+                try:
+                    query = select(Bookmark).where(Bookmark.id == bookmark_id)
+                    res = await session.execute(query)
+                    bm = res.scalars().first()
+                    if bm:
+                        parsed_url = urlparse(bm.url)
+                        bm.title = parsed_url.netloc or bm.url
+                        session.add(bm)
+                        await session.commit()
+                except Exception as ex:
+                    logger.error(f"Fallback title update failed: {str(ex)}")
+    finally:
+        await get_async_engine().dispose()
 
 
-async def weekly_broken_link_check_task():
+@shared_task(name="app.tasks.bookmark_tasks.weekly_broken_link_check_task")
+def weekly_broken_link_check_task():
+    """
+    Celery task wrapper for checking broken links.
+    """
+    asyncio.run(_weekly_broken_link_check_task_async())
+
+
+async def _weekly_broken_link_check_task_async():
     """
     Automatically checks for broken URLs.
     Checks bookmarks not verified in the last 7 days.
     """
-    async with AsyncSessionLocal() as session:
-        try:
+    try:
+        async with AsyncSessionLocal() as session:
             time_threshold = datetime.now(UTC) - timedelta(days=7)
             query = (
                 select(Bookmark)
@@ -152,7 +181,6 @@ async def weekly_broken_link_check_task():
 
                     check_log = BrokenLinkLog(
                         bookmark_id=bookmark.id,
-                        status_code=status_code,
                         error_message=(
                             error_message if is_broken else "Working perfectly"
                         ),
@@ -168,8 +196,12 @@ async def weekly_broken_link_check_task():
             await session.commit()
             logger.info("Broken link verification completed.")
 
-            for email, broken_list in user_broken_links.items():
-                await email_service.send_weekly_broken_links_summary(email, broken_list)
+    except Exception as e:
+        logger.error(f"Weekly broken link task failed: {str(e)}")
+    finally:
+        await get_async_engine().dispose()
 
-        except Exception as e:
-            logger.error(f"Weekly broken link task failed: {str(e)}")
+
+# NOTE: To run the Celery worker, use the following command in your terminal at that time in this only for testing purpose and later after this will be removed
+# python -m celery -A app.config.celery_app.celery_app worker --loglevel=info -P solo
+# python -m celery -A app.config.celery_app.celery_app beat --loglevel=info
